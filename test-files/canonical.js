@@ -8,7 +8,7 @@ var Documents = module.exports = function Documents(scorers) {
 Documents.prototype.doSomething = function() {
   var scorer;
   for (scorer in this.scorers) {
-    if (scorer.nextDoc() === NO_MORE_DOCS) 
+    if (scorer.nextDoc() === NO_MORE_DOCS) {
       this.last_doc = NO_MORE_DOCS;
       return;
     }

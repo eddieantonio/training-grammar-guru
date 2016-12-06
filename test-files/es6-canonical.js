@@ -8,7 +8,7 @@ export class Documents {
 
   doSomething() {
     for (var scorer in this.scorers) {
-      if (scorer.nextDoc() === NO_MORE_DOCS) 
+      if (scorer.nextDoc() === NO_MORE_DOCS) {
         this.last_doc = NO_MORE_DOCS;
         return;
       }
