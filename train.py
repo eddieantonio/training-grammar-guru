@@ -19,6 +19,7 @@
 Trains an LSTM from sentences in the vectorized corpus.
 """
 
+import os
 import argparse
 from pathlib import Path
 from typing import Optional, Tuple, Iterable, Sequence
@@ -67,6 +68,8 @@ parser.add_argument('--context-length', type=int, default=CONTEXT_LENGTH,
 parser.add_argument('--max-epochs', type=int, default=None,
                     help='default: train forever')
 parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
+                    help='default: %d' % BATCH_SIZE)
+parser.add_argument('--base-dir', type=Path, default=Path('~/Backup/models/'),
                     help='default: %d' % BATCH_SIZE)
 parser.add_argument('vectors_path', type=Path, metavar='vectors',
                     help='corpus of vectors, with assigned folds')
@@ -123,17 +126,20 @@ def train(
         context_length: int,
         batch_size: int,
         max_epochs: Optional[int],
+        base_dir: Path,
         previous_model: Optional[Path]=None
 ) -> None:
+    # Ensure the fold exists.
     assert vectors_path.exists()
     vectors = Vectors.connect_to(str(vectors_path))
     assert fold in vectors.fold_ids, (
         'Requested fold {} is not in {}'.format(fold, vectors.fold_ids)
     )
     vectors.disconnect()
+
+    # Compile the model and prepare the training and validation samples.
     model = compile_model(context_length=context_length,
                           hidden_layers=hidden_layers)
-
     training_batches, validation_batches = create_batches(
         fold=fold,
         backwards=backwards,
@@ -141,7 +147,19 @@ def train(
         vectors_path=vectors_path,
         context_length=context_length
     )
-    print("Will train on", training_batches.samples_per_epoch, "samples",
+
+    name = ','.join(str(layer) for layer in hidden_layers)
+    model_dir = base_dir / name
+    assert not model_dir.exists(), "refusing to overwrite " + str(base_dir)
+
+    # Create the directory.
+    os.mkdir(str(model_dir))
+
+    # We're ready to go!
+    with open(str(model_dir / 'summary.txt')) as summary_file:
+        print(model.summary(), file=summary_file)  # type: ignore
+    print("Saving data to", str(model_dir))
+    print("Training on", training_batches.samples_per_epoch, "samples",
           "using a batch size of", batch_size)
 
     from keras.callbacks import ModelCheckpoint, CSVLogger
@@ -154,17 +172,17 @@ def train(
             nb_val_samples=validation_batches.samples_per_epoch // batch_size,
             callbacks=[
                 ModelCheckpoint(
-                    './models/weights.{epoch:02d}-{val_loss:.2f}.hdf5',
+                    str(model_dir / 'weights.{epoch:02d}-{val_loss:.2f}.hdf5'),
                     save_best_only=False,
                     save_weights_only=False
                 ),
-                CSVLogger('./models/training.log', append=True)
+                CSVLogger(str(model_dir / 'training.log'), append=True)
             ],
             verbose=1,
             pickle_safe=True,
         )
     except KeyboardInterrupt:
-        filename = './models/interrupted.hdf5'
+        filename = model_dir / 'interrupted.hdf5'
         print("Saving model to", filename)
         model.save(filename)  # type: ignore
 
