@@ -21,7 +21,7 @@ Trains an LSTM from sentences in the vectorized corpus.
 
 import argparse
 from pathlib import Path
-from typing import Optional, Tuple, Iterable
+from typing import Optional, Tuple, Iterable, Sequence
 
 from vectors import Vectors
 from loop_batches import LoopBatchesEndlessly
@@ -29,11 +29,28 @@ from vocabulary import vocabulary
 
 
 # Based on White et al. 2015
-SIZE_OF_HIDDEN_LAYER = 300
+HIDDEN_LAYERS = (300,)
 CONTEXT_LENGTH = 20
 
 # This is arbitrary, but it should be fairly small.
 BATCH_SIZE = 512
+
+MAX_EPOCHS = 30
+
+
+def layers(string: str) -> Sequence[int]:
+    """
+    Parse hidden layer notation.
+
+    >>> layers('2000')
+    (2000,)
+    >>> layers('300,300,300')
+    (300, 300, 300)
+    """
+    result = tuple(int(layer) for layer in string.split(','))
+    assert len(result) >= 1, "Must define at least one hidden layer!"
+    return result
+
 
 # Create the argument parser.
 parser = argparse.ArgumentParser(description='Train from corpus '
@@ -43,10 +60,12 @@ parser.add_argument('-f', '--fold', type=int, required=True,
 group = parser.add_mutually_exclusive_group(required=True)
 group.add_argument('--backwards', action='store_true')
 group.add_argument('--forwards', action='store_false', dest='backwards')
-parser.add_argument('--hidden-layer', type=int, default=SIZE_OF_HIDDEN_LAYER,
-                    help='default: %d' % SIZE_OF_HIDDEN_LAYER)
+parser.add_argument('--hidden-layers', type=layers, default=HIDDEN_LAYERS,
+                    help='default: %r' % HIDDEN_LAYERS)
 parser.add_argument('--context-length', type=int, default=CONTEXT_LENGTH,
                     help='default: %d' % CONTEXT_LENGTH)
+parser.add_argument('--max-epochs', type=int, default=None,
+                    help='default: train forever')
 parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
                     help='default: %d' % BATCH_SIZE)
 parser.add_argument('vectors_path', type=Path, metavar='vectors',
@@ -58,27 +77,32 @@ parser.add_argument('---continue', type=Path, dest='previous_model',
 def compile_model(
         *,
         context_length: int,
-        hidden_layer: int,
+        hidden_layers: Sequence[int],
         learning_rate: float=0.001
 ) -> object:
     from keras.models import Sequential
     from keras.layers import Dense, Activation
     from keras.layers import LSTM
-    from keras.optimizers import SGD
-
-    # TODO:
-    #  - experiment with layers
+    from keras.optimizers import RMSProp
 
     model = Sequential()
-    model.add(LSTM(hidden_layer,
+
+    # The first layer defines the input, so special case it.
+    first_layer = hidden_layers[0]
+    model.add(LSTM(first_layer,
                    input_shape=(context_length, len(vocabulary))))
+
+    # Add the remaining LSTM layers (if any)
+    for layer in hidden_layers[1:]:
+        model.add(LSTM(layer))
+
     # Output is number of samples x size of hidden layer
     model.add(Dense(len(vocabulary)))
     # To make a thing that looks like a probability distribution.
     model.add(Activation('softmax'))
 
     model.compile(loss='categorical_crossentropy',
-                  optimizer=SGD(lr=learning_rate, momentum=0.9, nesterov=True),
+                  optimizer=RMSProp(lr=learning_rate),
                   metrics=['categorical_accuracy'])
     return model
 
@@ -95,9 +119,10 @@ def train(
         vectors_path: Path,
         fold: int,
         backwards: bool,
-        hidden_layer: int,
+        hidden_layers: Sequence[int],
         context_length: int,
         batch_size: int,
+        max_epochs: Optional[int],
         previous_model: Optional[Path]=None
 ) -> None:
     assert vectors_path.exists()
@@ -106,12 +131,8 @@ def train(
         'Requested fold {} is not in {}'.format(fold, vectors.fold_ids)
     )
     vectors.disconnect()
-
-    # TODO:
-    #  - point a symlink at the best model after each epoch
-
     model = compile_model(context_length=context_length,
-                          hidden_layer=hidden_layer)
+                          hidden_layers=hidden_layers)
 
     training_batches, validation_batches = create_batches(
         fold=fold,
@@ -128,7 +149,7 @@ def train(
         model.fit_generator(  # type: ignore
             iter(training_batches),
             validation_data=iter(validation_batches),
-            nb_epoch=2**31 - 1,  # a long-ass time
+            nb_epoch=max_epochs or 2**31 - 1,  # a long-ass time
             samples_per_epoch=training_batches.samples_per_epoch,
             nb_val_samples=validation_batches.samples_per_epoch // batch_size,
             callbacks=[
