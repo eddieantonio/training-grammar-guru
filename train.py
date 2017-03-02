@@ -64,7 +64,7 @@ def compile_model(
     from keras.models import Sequential
     from keras.layers import Dense, Activation
     from keras.layers import LSTM
-    from keras.optimizers import RMSprop
+    from keras.optimizers import SGD
 
     # TODO:
     #  - experiment with layers
@@ -78,7 +78,7 @@ def compile_model(
     model.add(Activation('softmax'))
 
     model.compile(loss='categorical_crossentropy',
-                  optimizer=RMSprop(lr=learning_rate),
+                  optimizer=SGD(lr=learning_rate, momentum=0.9, nesterov=True),
                   metrics=['categorical_accuracy'])
     return model
 
