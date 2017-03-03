@@ -69,7 +69,7 @@ parser.add_argument('--max-epochs', type=int, default=None,
                     help='default: train forever')
 parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
                     help='default: %d' % BATCH_SIZE)
-parser.add_argument('--base-dir', type=Path, default=Path('~/Backup/models/'),
+parser.add_argument('--base-dir', type=Path, default=Path('~/Backups/models/'),
                     help='default: %d' % BATCH_SIZE)
 parser.add_argument('vectors_path', type=Path, metavar='vectors',
                     help='corpus of vectors, with assigned folds')
@@ -86,18 +86,27 @@ def compile_model(
     from keras.models import Sequential
     from keras.layers import Dense, Activation
     from keras.layers import LSTM
-    from keras.optimizers import RMSProp
+    from keras.optimizers import RMSprop
 
     model = Sequential()
 
-    # The first layer defines the input, so special case it.
-    first_layer = hidden_layers[0]
-    model.add(LSTM(first_layer,
-                   input_shape=(context_length, len(vocabulary))))
-
-    # Add the remaining LSTM layers (if any)
-    for layer in hidden_layers[1:]:
-        model.add(LSTM(layer))
+    if len(hidden_layers) == 1:
+        # One LSTM layer is simple:
+        model.add(LSTM(first_layer,
+                       input_shape=(context_length, len(vocabulary))))
+    else:
+        first_layer, *middle_layers, last_layer = hidden_layers
+        # The first layer defines the input, so special case it.  Since there
+        # are more layers, all higher-up layers must return sequences.
+        model.add(LSTM(first_layer,
+                       input_shape=(context_length, len(vocabulary)),
+                       return_sequences=True))
+        # Add the middle LSTM layers (if any).
+        # These layers must also return sequences.
+        for layer in middle_layers:
+            model.add(LSTM(layer, return_sequences=True))
+        # Add the final layer.
+        model.add(LSTM(last_layer))
 
     # Output is number of samples x size of hidden layer
     model.add(Dense(len(vocabulary)))
@@ -105,7 +114,7 @@ def compile_model(
     model.add(Activation('softmax'))
 
     model.compile(loss='categorical_crossentropy',
-                  optimizer=RMSProp(lr=learning_rate),
+                  optimizer=RMSprop(lr=learning_rate),
                   metrics=['categorical_accuracy'])
     return model
 
@@ -149,15 +158,16 @@ def train(
     )
 
     name = ','.join(str(layer) for layer in hidden_layers)
-    model_dir = base_dir / name
-    assert not model_dir.exists(), "refusing to overwrite " + str(base_dir)
+    model_dir = (base_dir / name).expanduser()
+    assert not model_dir.exists(), "refusing to overwrite " + str(model_dir)
 
     # Create the directory.
     os.mkdir(str(model_dir))
 
     # We're ready to go!
-    with open(str(model_dir / 'summary.txt')) as summary_file:
-        print(model.summary(), file=summary_file)  # type: ignore
+    with open(str(model_dir / 'summary.txt'), 'w') as summary_file:
+        print(model.to_json(), file=summary_file)  # type: ignore
+
     print("Saving data to", str(model_dir))
     print("Training on", training_batches.samples_per_epoch, "samples",
           "using a batch size of", batch_size)
@@ -182,7 +192,7 @@ def train(
             pickle_safe=True,
         )
     except KeyboardInterrupt:
-        filename = model_dir / 'interrupted.hdf5'
+        filename = str(model_dir / 'interrupted.hdf5')
         print("Saving model to", filename)
         model.save(filename)  # type: ignore
 
