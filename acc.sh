@@ -8,11 +8,11 @@ EPOCH=1
 ACC=2
 VAL_ACC=4
 
-location="${2:-~easantos/training-grammar-guru/models}"
+location="${2:-$(realpath ~easantos/training-grammar-guru/models)}"
 csvfile="$location/training.log"
 device="${1:-dumb}"
 
-if realpath "$csvfile" &>/dev/null  && [ -s "$csvfile" ] ; then
+if [ -s "$csvfile" ] ; then
     csvfile="$(realpath "$csvfile")"
 else
     echo "Not a valid training log: $csvfile" 1>&2
