@@ -92,6 +92,7 @@ def compile_model(
 
     if len(hidden_layers) == 1:
         # One LSTM layer is simple:
+        first_layer = hidden_layers[0]
         model.add(LSTM(first_layer,
                        input_shape=(context_length, len(vocabulary))))
     else:
