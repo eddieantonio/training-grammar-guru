@@ -142,8 +142,7 @@ class SensibilityForEvaluation:
         results: List[IndexResult] = []
 
         # These will hold the TOP predictions at a given point.
-        forwards_predictions: List[Vind] = []
-        backwards_predictions: List[Vind] = []
+        top_predictions: List[Vind] = []
         contexts = enumerate(self.contexts(file_vector))
 
         for index, ((prefix, token), (suffix, _)) in contexts:
@@ -158,16 +157,12 @@ class SensibilityForEvaluation:
             result = IndexResult(index, file_vector, prefix_pred, suffix_pred)
             results.append(result)
 
-            # Store the TOP prediction from each model.
+            # Store the TOP TWO prediction from each model.
             # TODO: document corner cases!
-            top_next_prediction = prefix_pred.argmax()
-            top_prev_prediction = suffix_pred.argmax()
-            assert 0 <= top_next_prediction <= len(vocabulary)
-            assert 0 <= top_prev_prediction <= len(vocabulary)
-            forwards_predictions.append(cast(Vind, top_next_prediction))
-            backwards_predictions.append(cast(Vind, top_prev_prediction))
-            assert top_next_prediction == forwards_predictions[index]
-            assert top_prev_prediction == backwards_predictions[index]
+            top_prediction = (prefix_pred * suffix_pred).argmax()
+            assert 0 <= top_prediction <= len(vocabulary)
+            top_predictions.append(cast(Vind, top_prediction))
+            assert top_prediction == top_predictions[index]
 
         # Rank the results by some metric of similarity defined by IndexResult
         # (the top rank will be LEAST similar).
@@ -179,19 +174,16 @@ class SensibilityForEvaluation:
         for disagreement in ranked_results[:k]:
             pos = disagreement.index
 
-            likely_next: Vind = forwards_predictions[pos]
-            likely_prev: Vind = backwards_predictions[pos]
+            likely_token: Vind = top_predictions[pos]
 
             # Assume an addition. Let's try removing the offensive token.
             fixes.try_delete(pos)
 
             # Assume a deletion. Let's try inserting some tokens.
-            fixes.try_insert(pos, likely_next)
-            fixes.try_insert(pos, likely_prev)
+            fixes.try_insert(pos, likely_token)
 
             # Assume a substitution. Let's try swapping the token.
-            fixes.try_substitute(pos, likely_next)
-            fixes.try_substitute(pos, likely_prev)
+            fixes.try_substitute(pos, likely_token)
 
         return FixResult(ranks=ranked_results, fixes=tuple(fixes))
 
