@@ -32,6 +32,23 @@ from sensibility.fix import IndexResult, temporary_program
 from sensibility.tokenize_js import tokenize
 from sensibility._paths import VECTORS_PATH, SOURCES_PATH
 
+import time
+
+class time_section:
+    def __enter__(self) -> 'time_section':
+        self._start: float = time.monotonic()
+        return self
+
+    def __exit__(self, exc_type, *args):
+        end = time.monotonic()
+        if exc_type:
+            return
+        self.elapsed: float = end - self._start
+
+    def __str__(self) -> str:
+        return str(self.elapsed)
+
+
 
 t = Terminal()
 
@@ -130,12 +147,14 @@ if __name__ == '__main__':
 
     status("Initializing models...")
     with open('/dev/null', 'w') as null, redirect_stderr(null):
-        sensibility = Sensibility(0)
+        with time_section() as model_loading:
+            sensibility = Sensibility(0)
 
     with temporary_program(mutant) as mutated_file:
         # Do the (canned) prediction...
         status(f"Predicting on {mutated_file.name}")
-        ranked_locations, fixes = sensibility.rank_and_fix(mutated_file.name)
+        with time_section() as predicting:
+            ranked_locations, fixes = sensibility.rank_and_fix(mutated_file.name)
 
     print(fixes)
 
@@ -165,3 +184,7 @@ if __name__ == '__main__':
     for res in ranked_locations[:k]:
         score = float(res)
         print(f"{res.index:5d}: {score:8g};\t tv={res.total_variation:8g};\tl={res.indexed_prob:8g}")
+
+    print()
+    print(f"Took {model_loading}s to load the model.")
+    print(f"Took {predicting}s to predict on {len(original_file)} tokens")
